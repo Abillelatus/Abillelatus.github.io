@@ -1,0 +1,522 @@
+---
+title: "Case-One-Study"
+output: html_document
+authors: "Ryan Herrin, Celia Banks, Akib Hossain"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(plotly)
+library(ggplot2)
+library(plyr) # Load first before dplyer 
+library(dplyr)
+library(tidyr)
+library(maps)
+library(mapproj)
+library(ggalt)
+library(class)
+library(caret)
+library(e1071)
+library(tm)
+library(mvtnorm)
+library(xlsx)
+library(leaflet)
+library(ggvis)
+library(pracma)
+library(kknn) # used by the nearest_neighbor engine
+
+```
+
+## Setup
+```{r}
+# Setup file locations to import 
+beer_csv_loc <- "./StartingDBs/Beers.csv"
+breweries_csv_loc <- "./StartingDBs/Breweries.csv"
+
+# Read in data 
+beer_data <- read.csv(beer_csv_loc, header = TRUE)
+brewery_data <- read.csv(breweries_csv_loc, header = TRUE)
+
+# Data provided by Celia
+# Celia's contributions prefixed by cb_
+cb_beer <- read.xlsx(file="./StartingDBs/Beers_Celia.xlsx", sheetIndex = 1, 
+                     header=TRUE, stringsAsFactors = FALSE)
+cb_brewery <- read.xlsx(file="./StartingDBs/Breweries_Celia.xlsx", sheetIndex = 1, 
+                     header=TRUE, stringsAsFactors = FALSE)
+```
+
+Setting up the initial DB's and reading them into a data frame. 
+
+
+# Case study Questions 
+## 1. How many breweries are present in each state?
+```{r}
+# Create a seperate data frame to store state data 
+### Note: This data set counts the district of columbia as a state
+num_of_breweries_by_state <- data.frame(table(brewery_data$State))
+
+##### Celia Banks #####
+#Begin prepare an interactive geo map of breweries by state
+#set the map
+leaflet() %>% addTiles()
+#add popup for brewery information
+brewery_map <- cb_brewery %>% mutate(popup_info=paste(Name,"<br/>",City,"<br>",State,"<br>"))
+#tweak the map with info layout, set circles smaller to enhance visual
+leaflet() %>% addTiles() %>% addCircleMarkers(data=brewery_map, 
+                                              lat=~Latitude, 
+                                              lng=~Longitude, 
+                                              radius=~1, 
+                                              popup=~popup_info)
+#End prepare an interactive geo map of breweries by state#
+
+#corresponding distribution plot of breweries by state
+ggplot(brewery_map, aes(x=as.factor(State), color="blue")) +
+       geom_bar(color="blue") +
+       ggtitle("Distribution of Breweries by State") +
+       xlab("State") +
+       geom_text(stat='count', aes(label=after_stat(count)), vjust=-.25) +
+       theme(legend.position="none", axis.text.x = element_text(angle = 90)) +
+       theme(plot.title = element_text(hjust = 0.5))
+
+# Create data frame to access state count data 
+num_of_brew_by_state <- data.frame(as.factor(brewery_map$State))
+
+#corresponding distribution plot of breweries by region
+ggplot(brewery_map, aes(x=as.factor(Region), color="green")) +
+       geom_bar(color="green") +
+       ggtitle("Distribution of Breweries by Region") +
+       xlab("Region") +
+       geom_text(stat='count', aes(label=after_stat(count)), vjust=-.25) +
+       theme(legend.position="none", axis.text.x = element_text(angle = 90)) +
+       theme(plot.title = element_text(hjust = 0.5))
+
+##### END CB #####
+```
+
+The number of breweries per state are as follows:
+AK:7, AL:3, AR:2, AZ:11, CA:39, CO:47, CT:8, DC:1, DE:2, FL:15, GA:7, HI:4,
+IA:5, ID:5, IL:18, IN:22, KS:3, KY:4, LA:5, MA:23, MD:7, ME:9, MI:32, MN:12,
+MO:9, MS:2, MT:9, NC:19, ND:1, NE:5, NH:3, NJ:3, NM:4, NV:2, NY:15, OH:15, 
+OK:6, OR:29, PA:25, RI:5, SC:4, SD:1, TN:3, TX:28, UT:4, VA:16, VT:10, WA:23,
+WI:20, WV:1, WY:4
+
+
+## 2. Merge beer data with the breweries data. Print the first 6 observations and
+#the last six observations to check the merged file
+```{r}
+# Change column name of beer_data to match brewery_data to use as a primary key
+colnames(beer_data)[5] <- "Brew_ID"
+
+# Merge two data bases using merge
+full_brew_data <- merge(brewery_data, beer_data, by="Brew_ID")
+
+# Rename columns 2 and 5 that were changed during the merge
+colnames(full_brew_data)[2] <- "Brewery"
+colnames(full_brew_data)[5] <- "Beer_Name"
+
+# Print first 6 and last 6 observations 
+head(full_brew_data, n=6)
+tail(full_brew_data, n=6)
+
+# Create CSV Files for head and tail 
+head_output_csv <- "./output/head_beer_data.csv"
+tail_output_csv <- "./output/tail_been_data.csv"
+write.csv(head(full_brew_data, n=6), head_output_csv)
+write.csv(tail(full_brew_data, n=6), tail_output_csv)
+```
+
+The first and last 6 observations were written to CSV files in the "output" 
+file directory as well as printed in this file. 
+
+
+## 3. Address any NA values
+```{r}
+# Create two new tables where one has only ABV with no <NA>'s and the other 
+state_abv <- data.frame(State=full_brew_data$State, ABV=full_brew_data$ABV)
+state_abv <- state_abv %>% drop_na(ABV)
+
+# Do the same for IBU 
+state_ibu <- data.frame(State=full_brew_data$State, IBU=full_brew_data$IBU)
+state_ibu <- state_ibu %>% drop_na(IBU)
+```
+
+Multiple Data sets were created throught to handle specific questions. For 
+example; if the question asked for the comparison between ABV and IBU then any 
+beer with an NA for either would be dropped. For a question where ABV or IBU was
+not needed, then all data would be retained.
+
+
+## 4. Compute the median alcohol content and international bitterness unit for each
+##state. Plot a bar chart 
+```{r, fig.height=7, fig.width=12}
+# Find the average ABV for the state_abv table 
+avg_state_abv <- ddply(state_abv, .(State), function(x) median(x$ABV))
+colnames(avg_state_abv)[2] <- "Median_ABV" # Rename the column
+# Drop DC. It's not a state....yet
+avg_state_abv <- avg_state_abv[-c(8),] # DC is equal to position 8 on the table 
+# Order the states by Decending ABV content 
+avg_state_abv <- avg_state_abv[order(avg_state_abv$Median_ABV, decreasing=TRUE),]
+
+# Find Average IBU
+avg_state_ibu <- ddply(state_ibu, .(State), function(x) median(x$IBU))
+colnames(avg_state_ibu)[2] <- "Median_IBU" # Rename column
+# Order the states by IBU Decending 
+avg_state_ibu <- avg_state_ibu[order(avg_state_ibu$Median_IBU, decreasing=TRUE),]
+
+# Plot Average Alcohol by Volume per state
+ggplot(avg_state_abv, aes(x=reorder(State, desc(Median_ABV)), y=Median_ABV, fill=State)) + 
+       geom_col(show.legend = FALSE, width=.9, position="dodge") +
+       ggtitle("Median ABV per State") +
+       xlab("State") + 
+       ylab("Median Alcohol by Volume") 
+
+# Plot Average International Bitterness Unit per State 
+ggplot(avg_state_ibu, aes(x=reorder(State, desc(Median_IBU)), y=Median_IBU, fill=State)) + 
+       geom_col(show.legend = FALSE, width=.9, position="dodge") +
+       ggtitle("Median IBU per State") + 
+       xlab("State") + 
+       ylab("Median IBU")
+```
+
+
+## 4.1 Additional data
+```{r}
+##### Celia Code #####
+merge_bb <- merge(cb_beer, cb_brewery, by.x="Brewery_id", by.y="Brew_ID")
+#Drop latitude and longitude columns as no longer needed
+drop <- c("Latitude","Longitude")
+
+cb_merged_bb <- merge_bb[,!(names(merge_bb) %in% drop)]
+
+#rename columns to avoid confusion
+#cb_merged_bb <- cb_merged_bb %>% rename(Beer_Name = Name.x, Brewery_Name = Name.y)
+### RAH - used a different method of renaming columns ###
+colnames(cb_merged_bb)[2] <- "Beer_Name"
+colnames(cb_merged_bb)[8] <- "Brewery_Name"
+### End RAH ###
+
+#get count of breweries in each state
+brewery_count <- aggregate(Brewery_id ~ State, cb_merged_bb, sum)
+aggregate(cb_merged_bb$Brewery_id, by=list(Category=cb_merged_bb$State), FUN=sum)
+
+#impute the rows with zeroes
+cb_merged_bb$ABV[is.na(cb_merged_bb$ABV)] <- 0
+cb_merged_bb$IBU[is.na(cb_merged_bb$IBU)] <- 0
+
+#compute median ABV and IBU for each state
+cb_medianABV <- aggregate(ABV ~ State + Region, cb_merged_bb, median)
+cb_medianIBU <- aggregate(IBU ~ State + Region, cb_merged_bb, median)
+
+#merge the medians dataframes
+cb_mergeABVIBU <- merge(cb_medianABV, cb_medianIBU, by="State")
+drop <- c("Region.y")
+cb_mergeABVIBU = merge_bb[,!(names(merge_bb) %in% drop)]
+
+#Visualize ABV v IBU medians by state and by region
+options(scipen = 999)
+cb_mergeABVIBU <- as.data.frame(cb_mergeABVIBU)
+
+#by state
+ggplot(cb_mergeABVIBU, aes(ABV, IBU, color=State)) +
+       geom_point(show.legend = FALSE) +
+       facet_wrap(vars(State)) 
+
+#by region
+ggplot(cb_mergeABVIBU, aes(ABV, IBU, color=Region)) +
+       geom_point() +
+       facet_wrap(vars(Region))
+##### END #####
+```
+
+Celia was able to create a ABV vs IBU for state and regions. This gave us 
+additional data to make assumptions from. 
+
+
+## 5. Which state has the the Max ABV. Which has the 
+```{r}
+# Get the State with the highest average ABV
+state_max_abv <- full_brew_data[which.max(full_brew_data$ABV),] # CO
+state_max_abv[c(4,7)]
+# Get the State with the highest average IBU
+state_max_ibu <- full_brew_data[which.max(full_brew_data$IBU),] # OR
+state_max_ibu[c(4,8)]
+```
+
+Colorado has the highest percentage of alcohal by volume while Oregon has the 
+highest IBU. Keep in mind the question was asking for the max and not the max
+average.
+
+
+## 6. Comment on the Summary stats and distribution of the ABV variable 
+```{r}
+# Get summary and disply a histogram and boxplot
+summary(state_abv)
+ggplot(state_abv, aes(x=ABV)) + geom_histogram() # Right Skewness
+ggplot(state_abv, aes(x=ABV)) + geom_boxplot()
+```
+
+Most of the beer created fell inbetween 5.0% - 6.7% ABV with a mean of 5.9% and 
+a median of 5.6%. There is also a noticeable right skewness to the distribution.
+
+
+##7. Is there an apparent relationship between the bitterness of the beer and its alcoholic content? 
+```{r}
+# Create a new data frame from the beer data that removes rows that have <NA> in 
+# the ABV and IBU columns
+beer_data_no_na <- beer_data
+beer_data_no_na <- beer_data_no_na %>% drop_na(ABV)
+beer_data_no_na <- beer_data_no_na %>% drop_na(IBU)
+
+# Scatter plot to show raw data 
+ggplot(beer_data_no_na, aes(x=ABV, y=IBU, colour=Style)) + 
+       geom_point(show.legend = FALSE) + 
+       ggtitle("ABV vs IBU") +
+       xlab("ABV in %") + 
+       ylab("IBU")
+
+# Plot a smooth curve to see a more "linear" pattern 
+ggplot(beer_data_no_na, aes(x=ABV, y=IBU)) + 
+       geom_smooth() +
+       ggtitle("ABV vs IBU") + 
+       xlab("ABV in %") + 
+       ylab("IBU")
+```
+
+According to the charts there is a obvious positive correlation between ABV and
+IBU. After further investigation on why this could be, we found many answers 
+but not one that stood out. The most common answer was that the longeryou boil 
+hops to increase the IBU, the alcohol (ABV) goes up to ballance the bitterness.
+
+
+## 8. investigate the difference with respect to IBU and ABV between IPAs (India Pale Ales) 
+#and other types of Ale. Use KNN.
+```{r}
+# Create a data frame with only IPA's
+#df1[grep("dog",df1$type),]
+ipa_beers <- beer_data_no_na[grep("IPA",beer_data_no_na$Style),]
+# Change the Sytle column to only have the value of IPA for easier model training
+ipa_beers$Style <- "IPA"
+
+ales_beer <- beer_data_no_na[grep("Ale",beer_data_no_na$Style),]
+# Change the Sytle column to only have the value of Ale for easier model training
+ales_beer$Style <- "Ale"
+
+# Combine the two data sets 
+ipas_and_ales <- rbind(ipa_beers, ales_beer)
+
+# plot the data to get an initial view of the data
+ggplot(ipas_and_ales, aes(x=ABV, y=IBU, colour=Style)) + geom_point()
+
+# Create empty train and test data frames
+ipas_and_ales_train <- ipas_and_ales # train data needs to be a duplicate of orig
+ipas_and_ales_test <- data.frame()
+
+# Split 70/30 (Train/Test) #
+# Find the 30% value 
+samples_to_take <- round(as.numeric(nrow(ipas_and_ales_train)*.3), digits=0)
+for (row in 1:samples_to_take) {
+  tmp_row <- sample_n(ipas_and_ales_train, 1) # Take sample
+  # Add Sample to test data
+  ipas_and_ales_test <- ipas_and_ales_test %>% rbind(tmp_row)
+  # Remove Sample from train data
+  ipas_and_ales_train <- ipas_and_ales_train[!(ipas_and_ales_train$Beer_ID==tmp_row$Beer_ID),]
+}
+
+# Declare how many interations to run
+k_iterations <- 20
+
+# find an optimal K value for the KNN model
+style_accuracy <- data.frame(accuracy=numeric(k_iterations), k=numeric(k_iterations))
+for (iter in 1:k_iterations) {
+  # Note: [,c(3,4)] represent the ABV and IBU columns
+  style_class <- knn(ipas_and_ales_train[,c(3,4)], 
+                     ipas_and_ales_test[,c(3,4)],
+                     ipas_and_ales_train$Style,
+                     prob=TRUE, 
+                     k=iter)
+  table(ipas_and_ales_test$Style, style_class)
+  cm <- confusionMatrix(table(ipas_and_ales_test$Style, style_class))
+  style_accuracy$accuracy[iter] <- cm$overall[1]
+  style_accuracy$k[iter] <- iter
+}
+
+#plot(style_accuracy$k, style_accuracy$accuracy, type="l", xlab="k")
+plot_ly(style_accuracy, x=style_accuracy$k, y=style_accuracy$accuracy, 
+        type="scatter", mode="lines")
+
+# On average this loop gives me an optimal k level of k=5,6,7
+# Use 6 as the choice k
+optimal_k <- 6
+
+################################################################################
+# START Multi-Class prediction confidence with Heatmap
+# Use existing Training and Test Data Frames 
+
+# assign IBU column values as numeric to keep it the same as ABV
+ipas_and_ales_train$IBU <- as.numeric(ipas_and_ales_train$IBU)
+ipas_and_ales_test$IBU <- as.numeric(ipas_and_ales_test$IBU)
+# classification models require the outcome to be of type factor()
+ipas_and_ales_train$Style <- as.factor(ipas_and_ales_train$Style)
+ipas_and_ales_test$Style <- as.factor(ipas_and_ales_test$Style)
+
+# grid config
+grid_mesh_size <- .02
+grid_margin <- 1
+
+# Create a mesh grid to run the model
+grid_l_min <- min(ipas_and_ales$IBU) - grid_margin
+grid_l_max <- max(ipas_and_ales$IBU) + grid_margin
+grid_w_min <- min(ipas_and_ales$ABV) - grid_margin
+grid_w_max <- max(ipas_and_ales$ABV) + grid_margin
+grid_l_range <- seq(grid_l_min, grid_l_max, grid_mesh_size)
+grid_w_range <- seq(grid_w_min, grid_w_max, grid_mesh_size)
+beer_grid <- meshgrid(grid_l_range, grid_w_range)
+grid_ll <- beer_grid$X
+grid_ww <- beer_grid$Y
+
+# Create (another) classifier and run on the grid
+# Reuse the optimal k-value from ealier for the neighbors argument
+beer_model <- nearest_neighbor(neighbors=optimal_k, weight_func="inv") %>%
+  set_engine("kknn") %>%
+  set_mode("classification") %>% 
+  fit(formula=Style ~ ABV + IBU, data=ipas_and_ales_train)
+
+grid_ll_1 <- matrix(grid_ll, length(grid_ll), 1)
+grid_ww_1 <- matrix(grid_ww, length(grid_ww), 1)
+grid_final <- data.frame(grid_ll_1, grid_ww_1)
+
+colnames(grid_final) <- c("IBU", "ABV")
+
+grid_pred <- beer_model %>% predict(grid_final, type='prob')
+
+dim_value <- dim(grid_ll)
+
+prob_ipa <- matrix(grid_pred$.pred_IPA, dim_value[1], dim_value[2])
+prob_ale <- matrix(grid_pred$.pred_Ale, dim_value[1], dim_value[2])
+
+# Get the classifier Confidence 
+ale_ipa_z <- array(c(prob_ipa, prob_ale), dim=c(dim_value[1], dim_value[2],3))
+diff <- aaply(ale_ipa_z, c(1,2), max) - (aaply(ale_ipa_z, c(1,2), sum) - 
+                                           aaply(ale_ipa_z, c(1,2), max))
+
+# Overlay the heatmap of the confidence on the scatter plot of the example 
+ale_ipa_fig <- plot_ly()
+ale_ipa_fig <- ale_ipa_fig %>% 
+               add_trace(data=ipas_and_ales_test, 
+                         y= ~ABV, 
+                         x= ~IBU, 
+                         symbol= ~Style, 
+                         split= ~Style,
+                         symbols= c('square-dot', 'circle-dot'),
+                         type= 'scatter',
+                         mode= 'markers',
+                         marker= list(size=12, 
+                                      line=list(width=1.5), 
+                                      color='lightyellow')) %>%
+               layout(title="Prediction Confidence on Test Split")
+ale_ipa_fig <- ale_ipa_fig %>% add_trace(x=grid_l_range, y=grid_w_range, z=diff, type='heatmap')
+ale_ipa_fig
+```
+
+Using KNN and plotly to generate the above graph you can see the relationship 
+of Ales to IPAs. If you zoom into the chart you will be able to see that below 
+60 IBU the beer is predicted to be an Ale, but as IBU approached 60 and upward 
+the beer is likely to be classified as an IPA. With ABV having a positive 
+correlation with IBU the ABV is less of a factor in determining the beer Style.
+You need to zoom in to get the full affect. 
+
+
+## 9. Additional usefule data 
+```{r}
+# My goal here is to find the most popular style of beer for each region 
+#
+# Create a new data set based on the fully merged data at the start 
+style_by_region <- data.frame(full_brew_data)
+
+# Remove NA values for City, State, and Style 
+#state_ibu <- state_ibu %>% drop_na(IBU)
+style_by_region <- style_by_region %>% drop_na(City)
+style_by_region <- style_by_region %>% drop_na(State)
+style_by_region <- style_by_region %>% drop_na(Style)
+
+# Add region data by left joining from brewery_map using Brew_ID as primary key
+style_by_region <- left_join(style_by_region, brewery_map[,c("Brew_ID", "Region")])
+# Drop the columns not needed to make it easier to read
+style_by_region <- data.frame(style_by_region$Style, style_by_region$Region)
+
+# Lets break up the data by region 
+style_by_midwest <- filter(style_by_region, 
+                           style_by_region$style_by_region.Region == "Midwest")
+style_by_northeast <- filter(style_by_region, 
+                             style_by_region$style_by_region.Region == "Northeast")
+style_by_southeast <- filter(style_by_region, 
+                             style_by_region$style_by_region.Region == "Southeast")
+style_by_southwest <- filter(style_by_region, 
+                             style_by_region$style_by_region.Region == "Southwest")
+style_by_west <- filter(style_by_region, 
+                        style_by_region$style_by_region.Region == "West")
+
+# Find the top 5 styles per region
+style_by_midwest <- data.frame(table(style_by_midwest$style_by_region.Style))
+style_by_midwest <- style_by_midwest[order(style_by_midwest$Freq, decreasing = TRUE),]
+style_by_midwest <- head(style_by_midwest, n=5)
+
+style_by_northeast <- data.frame(table(style_by_northeast$style_by_region.Style))
+style_by_northeast <- style_by_northeast[order(style_by_northeast$Freq, decreasing = TRUE),]
+style_by_northeast <- head(style_by_northeast, n=5)
+
+style_by_southeast <- data.frame(table(style_by_southeast$style_by_region.Style))
+style_by_southeast <- style_by_southeast[order(style_by_southeast$Freq, decreasing = TRUE),]
+style_by_southeast <- head(style_by_southeast, n=5)
+
+style_by_southwest <- data.frame(table(style_by_southwest$style_by_region.Style))
+style_by_southwest <- style_by_southwest[order(style_by_southwest$Freq, decreasing = TRUE),]
+style_by_southwest <- head(style_by_southwest, n=5)
+
+style_by_west <- data.frame(table(style_by_west$style_by_region.Style))
+style_by_west <- style_by_west[order(style_by_west$Freq, decreasing = TRUE),]
+style_by_west <- head(style_by_west, n=5)
+
+# Create some bar charts to show results 
+# Midwest
+ggplot(style_by_midwest, aes(x=Var1, y=Freq, fill=Var1)) +
+       geom_col(show.legend = FALSE) +
+       ggtitle("Top 5 Styles for Midwest") +
+       xlab("Style") + ylab("Number of Style")
+# Northeast
+ggplot(style_by_northeast, aes(x=Var1, y=Freq, fill=Var1)) +
+       geom_col(show.legend = FALSE) +
+       ggtitle("Top 5 Styles for Northeast") +
+       xlab("Style") + ylab("Number of Style")
+# Southeast
+ggplot(style_by_southeast, aes(x=Var1, y=Freq, fill=Var1)) +
+       geom_col(show.legend = FALSE) +
+       ggtitle("Top 5 Styles for Southeast") +
+       xlab("Style") + ylab("Number of Style")
+# Southwest
+ggplot(style_by_southwest, aes(x=Var1, y=Freq, fill=Var1)) +
+       geom_col(show.legend = FALSE) +
+       ggtitle("Top 5 Styles for Southwest") +
+       xlab("Style") + ylab("Number of Style")
+# West
+ggplot(style_by_west, aes(x=Var1, y=Freq, fill=Var1)) +
+       geom_col(show.legend = FALSE) +
+       ggtitle("Top 5 Styles for West") +
+       xlab("Style") + ylab("Number of Style")
+```
+
+The results from my research shows two points. 
+1. The top two styles for every region is an "American IPA" and an 
+"American Pale Ale". 
+2. The third most popular style of beer is what is different between the 
+regions. Results as follows for the 3rd most popular of each region:
+
+Midwest - American Pale Wheat Ale, 
+Northeast - American Double / Imperial IPA, 
+Southeast - American Blonde Ale, 
+SouthWest - American Amber / Red Ale, 
+West - American Amber /Red Ale 
