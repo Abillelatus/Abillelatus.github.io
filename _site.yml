@@ -1,0 +1,8 @@
+name: "Abillelatus"
+navbar:
+    title: "Abillelatus"
+    left:
+        - text: "Home"
+          href: index.html
+        - text: "MSDS-6306 Case Study One"
+          href: Team-4-Case-One-Study.html
