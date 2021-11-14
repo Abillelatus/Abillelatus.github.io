@@ -1,0 +1,8 @@
+name: "Abillelatus_Website"
+navbar:
+  title: "Abillelatus Website"
+  left:
+    - text: "Home"
+      href: index.html
+    - text: "Case One Study"
+      href: Team-4-Case-One-Study.html
