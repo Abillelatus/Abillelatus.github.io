@@ -4,5 +4,7 @@ navbar:
   left:
     - text: "Home"
       href: index.html
+    - text: "About Me"
+      href: About_Me.html
     - text: "Case One Study"
       href: Team-4-Case-One-Study.html
